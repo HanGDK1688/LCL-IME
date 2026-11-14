@@ -26,7 +26,7 @@ import java.util.Map;
 public class LclImeService extends InputMethodService {
     private Board board;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
-    private final Runnable deleteLongPressRunnable = new Runnable() {
+    private final Runnable longDeleteRunnable = new Runnable() {
         @Override
         public void run() {
             if (board != null) {
@@ -58,11 +58,12 @@ public class LclImeService extends InputMethodService {
     }
 
     void setComposingText(String text) {
-        InputConnection ic = getCurrentInputConnection();
-        if (ic == null) return;
         if (text == null || text.isEmpty()) {
-            ic.finishComposingText();
-        } else {
+            finishComposingText();
+            return;
+        }
+        InputConnection ic = getCurrentInputConnection();
+        if (ic != null) {
             ic.setComposingText(text, 1);
         }
     }
@@ -74,18 +75,20 @@ public class LclImeService extends InputMethodService {
         }
     }
 
-    void deleteSurroundingText() {
+    void deleteOneChar() {
         InputConnection ic = getCurrentInputConnection();
-        if (ic == null) return;
-        ic.deleteSurroundingText(1, 0);
+        if (ic != null) {
+            ic.deleteSurroundingText(1, 0);
+        }
     }
 
-    void deleteAllCurrentText() {
+    void clearCurrentText() {
         InputConnection ic = getCurrentInputConnection();
-        if (ic == null) return;
-        Editable editable = ic.getEditableText();
-        if (editable != null) {
-            editable.clear();
+        if (ic != null) {
+            Editable editable = ic.getEditableText();
+            if (editable != null) {
+                editable.clear();
+            }
         }
     }
 
@@ -97,39 +100,37 @@ public class LclImeService extends InputMethodService {
     }
 
     class Board extends View {
-        private static final float TOP_BAR_RATIO = 0.14f;
-        private static final float BOTTOM_BAR_RATIO = 0.16f;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final String[] modeLabels = {"26键", "T9", "数字", "符号", "手写"};
-        private final HashMap<String, String[]> pinyinMap = new HashMap<>();
-        private final HashMap<Character, Character> traditionalMap = new HashMap<>();
-        private ArrayList<String> candidates = new ArrayList<>();
-        private ArrayList<Float> strokeX = new ArrayList<>();
-        private ArrayList<Float> strokeY = new ArrayList<>();
+        private final Map<String, String[]> dictionary = new HashMap<>();
+        private final Map<Character, Character> traditionalMap = new HashMap<>();
 
         private String currentMode = "26键";
         private String theme = "浅色";
         private String language = "中";
         private String script = "简";
-        private boolean menuOpen = false;
         private boolean shift = false;
+        private boolean menuOpen = false;
         private String composing = "";
         private String t9Buffer = "";
         private String lastT9Key = "";
         private long lastT9TapAt = 0L;
+        private ArrayList<String> candidates = new ArrayList<>();
+        private ArrayList<Float> strokeX = new ArrayList<>();
+        private ArrayList<Float> strokeY = new ArrayList<>();
 
-        private float width;
-        private float height;
-        private float topHeight;
-        private float candHeight;
-        private float keyHeight;
-        private float bottomHeight;
-
-        private int backgroundColor;
+        private int bgColor;
         private int keyColor;
         private int textColor;
         private int accentColor;
         private int accentTextColor;
+
+        private float width;
+        private float height;
+        private float topBarHeight;
+        private float bottomBarHeight;
+        private float candidateHeight;
+        private float keyboardHeight;
 
         Board(Context context) {
             super(context);
@@ -139,47 +140,30 @@ public class LclImeService extends InputMethodService {
         }
 
         private void initDictionary() {
-            pinyinMap.put("ni", new String[]{"你", "泥", "尼", "呢", "拟", "逆", "妮"});
-            pinyinMap.put("hao", new String[]{"好", "号", "浩", "豪", "耗", "毫"});
-            pinyinMap.put("wo", new String[]{"我", "握", "窝", "喔", "沃"});
-            pinyinMap.put("shi", new String[]{"是", "时", "事", "市", "试", "识"});
-            pinyinMap.put("de", new String[]{"的", "得", "地", "德", "底"});
-            pinyinMap.put("ma", new String[]{"吗", "妈", "马", "嘛", "麻"});
-            pinyinMap.put("zhong", new String[]{"中", "钟", "众", "重", "终"});
-            pinyinMap.put("guo", new String[]{"国", "过", "果", "锅", "郭"});
-            pinyinMap.put("ren", new String[]{"人", "认", "忍", "仁"});
-            pinyinMap.put("tian", new String[]{"天", "田", "甜", "填", "舔"});
-            pinyinMap.put("qi", new String[]{"起", "其", "气", "七", "期"});
-            pinyinMap.put("xie", new String[]{"写", "些", "谢", "卸", "斜"});
-            pinyinMap.put("yi", new String[]{"一", "以", "意", "已", "易"});
-            pinyinMap.put("er", new String[]{"二", "而", "儿", "额", "耳"});
-            pinyinMap.put("ri", new String[]{"日", "日子", "认"});
-            pinyinMap.put("zhongguo", new String[]{"中国", "中国人", "中华"});
-            pinyinMap.put("nihao", new String[]{"你好", "您好", "你好吗"});
-            pinyinMap.put("ming", new String[]{"明", "名", "命", "鸣"});
-            pinyinMap.put("zhongguoren", new String[]{"中国人"});
+            dictionary.put("ni", new String[]{"你", "泥", "尼", "呢", "拟", "逆", "妮"});
+            dictionary.put("hao", new String[]{"好", "号", "浩", "豪", "耗", "毫"});
+            dictionary.put("wo", new String[]{"我", "握", "窝", "喔", "沃"});
+            dictionary.put("shi", new String[]{"是", "时", "事", "市", "试", "识"});
+            dictionary.put("de", new String[]{"的", "得", "地", "德", "底"});
+            dictionary.put("ma", new String[]{"吗", "妈", "马", "嘛", "麻"});
+            dictionary.put("zhong", new String[]{"中", "钟", "众", "重", "终"});
+            dictionary.put("guo", new String[]{"国", "过", "果", "锅", "郭"});
+            dictionary.put("ren", new String[]{"人", "认", "忍", "仁"});
+            dictionary.put("tian", new String[]{"天", "田", "甜", "填", "舔"});
+            dictionary.put("qi", new String[]{"起", "其", "气", "七", "期"});
+            dictionary.put("xie", new String[]{"写", "些", "谢", "卸", "斜"});
+            dictionary.put("nihao", new String[]{"你好", "您好", "你好吗"});
+            dictionary.put("zhongguo", new String[]{"中国", "中国人", "中华"});
+            dictionary.put("yi", new String[]{"一", "以", "意", "已", "易"});
+            dictionary.put("er", new String[]{"二", "而", "儿", "额", "耳"});
         }
 
         private void initTraditionalMap() {
-            traditionalMap.put('中', '中');
             traditionalMap.put('国', '國');
             traditionalMap.put('人', '人');
             traditionalMap.put('我', '我');
             traditionalMap.put('你', '你');
             traditionalMap.put('好', '好');
-            traditionalMap.put('天', '天');
-            traditionalMap.put('明', '明');
-            traditionalMap.put('日', '日');
-            traditionalMap.put('一', '一');
-            traditionalMap.put('二', '二');
-            traditionalMap.put('三', '三');
-            traditionalMap.put('四', '四');
-            traditionalMap.put('五', '五');
-            traditionalMap.put('六', '六');
-            traditionalMap.put('七', '七');
-            traditionalMap.put('八', '八');
-            traditionalMap.put('九', '九');
-            traditionalMap.put('零', '零');
             traditionalMap.put('中', '中');
             traditionalMap.put('来', '來');
             traditionalMap.put('为', '為');
@@ -197,27 +181,27 @@ public class LclImeService extends InputMethodService {
             traditionalMap.put('发', '發');
         }
 
-        private void applyTheme() {
+        private void updateThemeColors() {
             if ("深色".equals(theme)) {
-                backgroundColor = 0xFF202124;
+                bgColor = 0xFF202124;
                 keyColor = 0xFF2E3136;
                 textColor = 0xFFFFFFFF;
                 accentColor = 0xFF8AB4F8;
                 accentTextColor = 0xFFFFFFFF;
             } else if ("蓝色".equals(theme)) {
-                backgroundColor = 0xFFEAF3FF;
+                bgColor = 0xFFEAF3FF;
                 keyColor = 0xFFFFFFFF;
                 textColor = 0xFF183A5B;
                 accentColor = 0xFF3A7FE8;
                 accentTextColor = 0xFFFFFFFF;
             } else if ("绿色".equals(theme)) {
-                backgroundColor = 0xFFEAF7EE;
+                bgColor = 0xFFEAF7EE;
                 keyColor = 0xFFFFFFFF;
                 textColor = 0xFF18472D;
                 accentColor = 0xFF2E9C5A;
                 accentTextColor = 0xFFFFFFFF;
             } else {
-                backgroundColor = 0xFFF2F3F5;
+                bgColor = 0xFFF2F3F5;
                 keyColor = 0xFFFFFFFF;
                 textColor = 0xFF1F2328;
                 accentColor = 0xFF4C83D8;
@@ -230,19 +214,17 @@ public class LclImeService extends InputMethodService {
             super.onDraw(canvas);
             width = getWidth();
             height = getHeight();
-            applyTheme();
+            updateThemeColors();
 
-            topHeight = height * TOP_BAR_RATIO;
-            candHeight = candidates.isEmpty() ? 0 : height * 0.12f;
-            bottomHeight = height * BOTTOM_BAR_RATIO;
-            keyHeight = height - topHeight - candHeight - bottomHeight;
+            topBarHeight = height * 0.14f;
+            candidateHeight = candidates.isEmpty() ? 0f : height * 0.12f;
+            bottomBarHeight = height * 0.16f;
+            keyboardHeight = height - topBarHeight - candidateHeight - bottomBarHeight;
 
-            paint.setStyle(Paint.Style.FILL);
-            canvas.drawColor(backgroundColor);
-
+            canvas.drawColor(bgColor);
             drawTopBar(canvas);
-            drawCandBar(canvas);
-            drawKeyboardArea(canvas);
+            drawCandidateBar(canvas);
+            drawMainArea(canvas);
             drawBottomBar(canvas);
             if (menuOpen) {
                 drawModeMenu(canvas);
@@ -250,33 +232,35 @@ public class LclImeService extends InputMethodService {
         }
 
         private void drawTopBar(Canvas canvas) {
-            float cell = width / 4f;
+            float cellWidth = width / 4f;
             String[] labels = {"键盘", "主题", "剪贴板", "隐藏"};
             for (int i = 0; i < 4; i++) {
-                float left = i * cell;
-                float right = left + cell;
-                drawRoundedRect(canvas, left + 4, 8, right - 4, topHeight - 8, keyColor);
-                drawText(canvas, labels[i], (left + right) / 2f, topHeight * 0.58f, textColor, 16f, Paint.Align.CENTER);
+                float left = i * cellWidth + 4f;
+                float top = 8f;
+                float right = (i + 1) * cellWidth - 4f;
+                float bottom = topBarHeight - 8f;
+                drawRoundedRect(canvas, left, top, right, bottom, keyColor);
+                drawText(canvas, labels[i], (left + right) / 2f, topBarHeight * 0.58f, textColor, 16f, Paint.Align.CENTER);
             }
         }
 
-        private void drawCandBar(Canvas canvas) {
+        private void drawCandidateBar(Canvas canvas) {
             if (candidates.isEmpty()) return;
-            float y = topHeight + candHeight * 0.58f;
-            String prefix = composing.isEmpty() ? "" : composing + " ";
-            drawText(canvas, prefix, 12, y, accentColor, 16f, Paint.Align.LEFT);
-
+            float y = topBarHeight + candidateHeight * 0.58f;
+            if (!composing.isEmpty()) {
+                drawText(canvas, composing + " ", 12f, y, accentColor, 16f, Paint.Align.LEFT);
+            }
             float startX = Math.max(90f, width * 0.32f);
-            float slot = (width - startX) / Math.max(1, Math.min(6, candidates.size()));
+            float slotWidth = (width - startX) / Math.max(1, Math.min(6, candidates.size()));
             for (int i = 0; i < Math.min(candidates.size(), 6); i++) {
-                drawText(canvas, candidates.get(i), startX + i * slot + slot * 0.5f, y, textColor, 17f, Paint.Align.CENTER);
+                drawText(canvas, candidates.get(i), startX + i * slotWidth + slotWidth * 0.5f, y, textColor, 17f, Paint.Align.CENTER);
             }
         }
 
-        private void drawKeyboardArea(Canvas canvas) {
-            float yStart = topHeight + candHeight;
+        private void drawMainArea(Canvas canvas) {
+            float yStart = topBarHeight + candidateHeight;
             if ("手写".equals(currentMode)) {
-                drawHandWriteArea(canvas, yStart);
+                drawHandwriteArea(canvas, yStart);
             } else {
                 drawKeyLayout(canvas, yStart);
             }
@@ -299,18 +283,18 @@ public class LclImeService extends InputMethodService {
                         {"！", "？", "%", "&", "*", "…"}};
             }
 
-            float rowGap = 8f;
-            float rowHeight = (height - yStart - bottomHeight) / rows.length;
-            for (int row = 0; row < rows.length; row++) {
-                float currentY = yStart + row * rowHeight;
-                String[] cells = rows[row];
-                float cellWidth = width / cells.length;
-                for (int col = 0; col < cells.length; col++) {
-                    float left = col * cellWidth + 4;
-                    float top = currentY + 4;
-                    float right = left + cellWidth - 8;
-                    float bottom = currentY + rowHeight - 6;
-                    String label = cells[col];
+            float keyTop = yStart;
+            float rowHeight = keyboardHeight / rows.length;
+            for (int rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+                String[] row = rows[rowIndex];
+                float currentY = keyTop + rowIndex * rowHeight;
+                float cellWidth = width / row.length;
+                for (int col = 0; col < row.length; col++) {
+                    float left = col * cellWidth + 4f;
+                    float right = (col + 1) * cellWidth - 4f;
+                    float top = currentY + 4f;
+                    float bottom = currentY + rowHeight - 6f;
+                    String label = row[col];
                     if ("26键".equals(currentMode) && label.length() == 1 && Character.isLetter(label.charAt(0))) {
                         label = shift ? label.toUpperCase(Locale.ROOT) : label.toLowerCase(Locale.ROOT);
                     }
@@ -320,25 +304,25 @@ public class LclImeService extends InputMethodService {
             }
         }
 
-        private void drawHandWriteArea(Canvas canvas, float yStart) {
+        private void drawHandwriteArea(Canvas canvas, float yStart) {
             float boardTop = yStart + 8f;
-            float boardBottom = height - bottomHeight - 8f;
-            drawRoundedRect(canvas, 8f, boardTop, width - 8f, boardBottom, 0xFFCDD3DB);
+            float boardBottom = height - bottomBarHeight - 8f;
+            drawRoundedRect(canvas, 8f, boardTop, width - 8f, boardBottom, 0xFFCED4DC);
             drawText(canvas, "手写区：画字后松手识别", width / 2f, (boardTop + boardBottom) / 2f, textColor, 15f, Paint.Align.CENTER);
+
             float clearLeft = width - 110f;
             float clearTop = boardBottom - 54f;
-            drawRoundedRect(canvas, clearLeft, clearTop, width - 12f, boardBottom - 12f, keyColor);
-            drawText(canvas, "清空", (clearLeft + width - 12f) / 2f, boardBottom - 32f, textColor, 14f, Paint.Align.CENTER);
-            if (!strokeX.isEmpty()) {
+            float clearRight = width - 12f;
+            float clearBottom = boardBottom - 12f;
+            drawRoundedRect(canvas, clearLeft, clearTop, clearRight, clearBottom, keyColor);
+            drawText(canvas, "清空", (clearLeft + clearRight) / 2f, clearBottom - 22f, textColor, 14f, Paint.Align.CENTER);
+
+            if (!strokeX.isEmpty() && strokeY.size() == strokeX.size()) {
                 paint.setStyle(Paint.Style.STROKE);
                 paint.setColor(accentColor);
                 paint.setStrokeWidth(4f);
                 for (int i = 1; i < strokeX.size(); i++) {
-                    float x1 = strokeX.get(i - 1);
-                    float y1 = strokeY.get(i - 1);
-                    float x2 = strokeX.get(i);
-                    float y2 = strokeY.get(i);
-                    canvas.drawLine(x1, y1, x2, y2, paint);
+                    canvas.drawLine(strokeX.get(i - 1), strokeY.get(i - 1), strokeX.get(i), strokeY.get(i), paint);
                 }
                 paint.setStyle(Paint.Style.FILL);
             }
@@ -350,29 +334,26 @@ public class LclImeService extends InputMethodService {
             float x = 0f;
             for (int i = 0; i < labels.length; i++) {
                 float cellWidth = width * widths[i];
-                float left = x;
-                float top = height - bottomHeight;
-                float right = left + cellWidth;
-                float bottom = height;
-                if (i == 3) {
-                    drawRoundedRect(canvas, left + 2f, top + 4f, right - 2f, bottom - 4f, accentColor);
-                    drawText(canvas, labels[i], (left + right) / 2f, height - bottomHeight * 0.52f, accentTextColor, 19f, Paint.Align.CENTER);
-                } else {
-                    drawRoundedRect(canvas, left + 2f, top + 4f, right - 2f, bottom - 4f, keyColor);
-                    drawText(canvas, labels[i], (left + right) / 2f, height - bottomHeight * 0.52f, textColor, 17f, Paint.Align.CENTER);
-                }
+                float left = x + 2f;
+                float top = height - bottomBarHeight + 4f;
+                float right = x + cellWidth - 2f;
+                float bottom = height - 4f;
+                int fillColor = (i == 3) ? accentColor : keyColor;
+                int textTint = (i == 3) ? accentTextColor : textColor;
+                drawRoundedRect(canvas, left, top, right, bottom, fillColor);
+                drawText(canvas, labels[i], (left + right) / 2f, (top + bottom) / 2f + 8f, textTint, 17f, Paint.Align.CENTER);
                 x += cellWidth;
             }
         }
 
         private void drawModeMenu(Canvas canvas) {
             float menuX = 10f;
-            float menuY = topHeight + 8f;
+            float menuY = topBarHeight + 8f;
             float menuW = width * 0.42f;
-            float menuH = keyHeight * 0.62f;
-            drawRoundedRect(canvas, menuX, menuY, menuX + menuW, menuY + menuH, 0xFFFFFFFF);
+            float menuH = keyboardHeight * 0.62f;
+            drawRoundedRect(canvas, menuX, menuY, menuX + menuW, menuY + menuH, Color.WHITE);
             for (int i = 0; i < modeLabels.length; i++) {
-                float y = menuY + 20f + i * (menuH / modeLabels.length);
+                float y = menuY + 22f + i * (menuH / modeLabels.length);
                 drawText(canvas, modeLabels[i], menuX + menuW / 2f, y, textColor, 16f, Paint.Align.CENTER);
             }
         }
@@ -383,11 +364,11 @@ public class LclImeService extends InputMethodService {
             canvas.drawRoundRect(new RectF(left, top, right, bottom), 12f, 12f, paint);
         }
 
-        private void drawText(Canvas canvas, String text, float x, float y, int color, float size, Paint.Align align) {
+        private void drawText(Canvas canvas, String text, float x, float y, int color, float textSize, Paint.Align align) {
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(color);
             paint.setTextAlign(align);
-            paint.setTextSize(size);
+            paint.setTextSize(textSize);
             paint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
             canvas.drawText(text, x, y, paint);
         }
@@ -398,12 +379,12 @@ public class LclImeService extends InputMethodService {
                 invalidate();
                 return;
             }
-            String py = composing.toLowerCase(Locale.ROOT);
-            String[] list = pinyinMap.get(py);
-            if (list != null) {
-                candidates.addAll(Arrays.asList(list));
-            } else if (py.matches("[a-z]+")) {
-                candidates.add(py);
+            String key = composing.toLowerCase(Locale.ROOT);
+            String[] matched = dictionary.get(key);
+            if (matched != null) {
+                candidates.addAll(Arrays.asList(matched));
+            } else if (key.matches("[a-z]+")) {
+                candidates.add(key);
             }
             invalidate();
         }
@@ -433,43 +414,42 @@ public class LclImeService extends InputMethodService {
             return sb.toString();
         }
 
-        private void handleAlphabetInput(String input) {
+        private void addLetterToComposing(String letter) {
             if ("En".equals(language)) {
-                String letter = shift ? input.toUpperCase(Locale.ROOT) : input.toLowerCase(Locale.ROOT);
-                commitText(letter);
+                String output = shift ? letter.toUpperCase(Locale.ROOT) : letter.toLowerCase(Locale.ROOT);
+                commitText(output);
                 shift = false;
                 invalidate();
                 return;
             }
             if ("26键".equals(currentMode) || "T9".equals(currentMode)) {
-                String key = input.toLowerCase(Locale.ROOT);
                 if ("T9".equals(currentMode)) {
-                    appendT9Key(key);
+                    addT9Letter(letter);
                     return;
                 }
-                composing += key;
+                composing += letter.toLowerCase(Locale.ROOT);
                 setComposingText(composing);
                 refreshCandidates();
             } else {
-                commitText(input);
+                commitText(letter);
             }
         }
 
-        private void appendT9Key(String key) {
-            if (!key.matches("[2-9]")) {
-                return;
-            }
+        private void addT9Letter(String digit) {
+            if (!digit.matches("[2-9]")) return;
             final String[] groups = {"", "", "abc", "def", "ghi", "jkl", "mno", "pqrs", "tuv", "wxyz"};
-            String group = groups[Integer.parseInt(key)];
+            String group = groups[Integer.parseInt(digit)];
+            if (group.isEmpty()) return;
+
             long now = System.currentTimeMillis();
-            if (lastT9Key.equals(key) && now - lastT9TapAt < 800 && !group.isEmpty()) {
+            if (lastT9Key.equals(digit) && now - lastT9TapAt < 800 && !t9Buffer.isEmpty()) {
                 int currentIndex = group.indexOf(t9Buffer.charAt(t9Buffer.length() - 1));
                 int nextIndex = (currentIndex + 1) % group.length();
                 t9Buffer = String.valueOf(group.charAt(nextIndex));
             } else {
                 t9Buffer = String.valueOf(group.charAt(0));
             }
-            lastT9Key = key;
+            lastT9Key = digit;
             lastT9TapAt = now;
             composing += t9Buffer;
             setComposingText(composing);
@@ -506,17 +486,16 @@ public class LclImeService extends InputMethodService {
             invalidate();
         }
 
-        private void handleModeSelection(int index) {
-            if (index >= 0 && index < modeLabels.length) {
-                currentMode = modeLabels[index];
-                menuOpen = false;
-                composing = "";
-                t9Buffer = "";
-                lastT9Key = "";
-                candidates.clear();
-                finishComposingText();
-                invalidate();
-            }
+        private void handleModeChoice(int index) {
+            if (index < 0 || index >= modeLabels.length) return;
+            currentMode = modeLabels[index];
+            menuOpen = false;
+            composing = "";
+            t9Buffer = "";
+            lastT9Key = "";
+            candidates.clear();
+            finishComposingText();
+            invalidate();
         }
 
         private void handleBottomAction(int index) {
@@ -546,7 +525,7 @@ public class LclImeService extends InputMethodService {
                     setComposingText(composing);
                     refreshCandidates();
                 } else {
-                    deleteSurroundingText();
+                    deleteOneChar();
                 }
             } else if (index == 5) {
                 sendEnter();
@@ -560,14 +539,16 @@ public class LclImeService extends InputMethodService {
             lastT9Key = "";
             candidates.clear();
             finishComposingText();
-            deleteAllCurrentText();
+            clearCurrentText();
             invalidate();
         }
 
-        private int detectBottomIndex(float x) {
+        private int bottomIndexForX(float x) {
             float[] cuts = {0.12f, 0.24f, 0.39f, 0.66f, 0.82f, 1.0f};
             for (int i = 0; i < cuts.length; i++) {
-                if (x <= width * cuts[i]) return i;
+                if (x <= width * cuts[i]) {
+                    return i;
+                }
             }
             return 5;
         }
@@ -577,16 +558,16 @@ public class LclImeService extends InputMethodService {
             float x = event.getX();
             float y = event.getY();
 
-            if (event.getAction() == MotionEvent.ACTION_DOWN && y >= height - bottomHeight && y <= height && x >= width * 0.82f && x <= width * 0.96f) {
-                uiHandler.removeCallbacks(deleteLongPressRunnable);
-                uiHandler.postDelayed(deleteLongPressRunnable, 500L);
+            if (event.getAction() == MotionEvent.ACTION_DOWN && y >= height - bottomBarHeight && y <= height && x >= width * 0.82f && x <= width * 0.96f) {
+                uiHandler.removeCallbacks(longDeleteRunnable);
+                uiHandler.postDelayed(longDeleteRunnable, 500L);
             }
             if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
-                uiHandler.removeCallbacks(deleteLongPressRunnable);
+                uiHandler.removeCallbacks(longDeleteRunnable);
             }
 
             if (event.getAction() != MotionEvent.ACTION_UP) {
-                if ("手写".equals(currentMode) && y > topHeight + candHeight && y < height - bottomHeight) {
+                if ("手写".equals(currentMode) && y > topBarHeight + candidateHeight && y < height - bottomBarHeight) {
                     if (event.getAction() == MotionEvent.ACTION_DOWN) {
                         strokeX.clear();
                         strokeY.clear();
@@ -601,7 +582,7 @@ public class LclImeService extends InputMethodService {
                 return true;
             }
 
-            if (y < topHeight) {
+            if (y < topBarHeight) {
                 int index = (int) (x / (width / 4f));
                 if (index >= 0 && index <= 3) {
                     handleTopBarTap(index);
@@ -609,29 +590,28 @@ public class LclImeService extends InputMethodService {
                 return true;
             }
 
-            if (menuOpen && y >= topHeight && y <= topHeight + keyHeight * 0.62f) {
-                float menuBoxTop = topHeight + 8f;
-                float menuBoxHeight = keyHeight * 0.62f;
-                int index = (int) ((y - menuBoxTop) / (menuBoxHeight / modeLabels.length));
-                handleModeSelection(index);
+            if (menuOpen && y >= topBarHeight && y <= topBarHeight + keyboardHeight * 0.62f) {
+                float menuTop = topBarHeight + 8f;
+                float menuHeight = keyboardHeight * 0.62f;
+                int index = (int) ((y - menuTop) / (menuHeight / modeLabels.length));
+                handleModeChoice(index);
                 return true;
             }
 
-            if (!candidates.isEmpty() && y >= topHeight && y < topHeight + candHeight) {
-                float start = Math.max(90f, width * 0.32f);
-                int index = (int) ((x - start) / ((width - start) / Math.max(1, Math.min(6, candidates.size()))));
+            if (!candidates.isEmpty() && y >= topBarHeight && y < topBarHeight + candidateHeight) {
+                float startX = Math.max(90f, width * 0.32f);
+                int index = (int) ((x - startX) / ((width - startX) / Math.max(1, Math.min(6, candidates.size()))));
                 submitCandidate(Math.max(0, Math.min(candidates.size() - 1, index)));
                 return true;
             }
 
-            if (y >= height - bottomHeight) {
-                int index = detectBottomIndex(x);
-                handleBottomAction(index);
+            if (y >= height - bottomBarHeight) {
+                handleBottomAction(bottomIndexForX(x));
                 return true;
             }
 
-            if ("手写".equals(currentMode) && y > topHeight + candHeight && y < height - bottomHeight) {
-                if (x > width - 110f && y > height - bottomHeight - 54f) {
+            if ("手写".equals(currentMode) && y > topBarHeight + candidateHeight && y < height - bottomBarHeight) {
+                if (x > width - 110f && y > height - bottomBarHeight - 54f) {
                     strokeX.clear();
                     strokeY.clear();
                     candidates.clear();
@@ -651,47 +631,53 @@ public class LclImeService extends InputMethodService {
                 return true;
             }
 
-            if (y > topHeight + candHeight && y < height - bottomHeight) {
-                float rowHeight = keyHeight / 3f;
-                int row = (int) ((y - (topHeight + candHeight)) / rowHeight);
-                row = Math.max(0, Math.min(2, row));
-                String[][] rows = { {"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
-                        {"a", "s", "d", "f", "g", "h", "j", "k", "l"},
-                        {"z", "x", "c", "v", "b", "n", "m"} };
+            if (y > topBarHeight + candidateHeight && y < height - bottomBarHeight) {
                 if ("26键".equals(currentMode)) {
+                    String[][] rows = {{"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
+                            {"a", "s", "d", "f", "g", "h", "j", "k", "l"},
+                            {"z", "x", "c", "v", "b", "n", "m"}};
+                    int row = (int) ((y - (topBarHeight + candidateHeight)) / (keyboardHeight / rows.length));
+                    row = Math.max(0, Math.min(rows.length - 1, row));
                     float cellWidth = width / rows[row].length;
                     int col = (int) (x / cellWidth);
                     col = Math.max(0, Math.min(rows[row].length - 1, col));
-                    handleAlphabetInput(rows[row][col]);
+                    addLetterToComposing(rows[row][col]);
                     return true;
                 }
+
                 if ("T9".equals(currentMode)) {
-                    String[][] t9Rows = {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"*", "0", "#"}};
-                    int r = (int) ((y - (topHeight + candHeight)) / (keyHeight / t9Rows.length));
-                    r = Math.max(0, Math.min(t9Rows.length - 1, r));
-                    float cellW = width / t9Rows[r].length;
-                    int c = (int) (x / cellW);
-                    c = Math.max(0, Math.min(t9Rows[r].length - 1, c));
-                    handleAlphabetInput(t9Rows[r][c]);
+                    String[][] rows = {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"*", "0", "#"}};
+                    int row = (int) ((y - (topBarHeight + candidateHeight)) / (keyboardHeight / rows.length));
+                    row = Math.max(0, Math.min(rows.length - 1, row));
+                    float cellWidth = width / rows[row].length;
+                    int col = (int) (x / cellWidth);
+                    col = Math.max(0, Math.min(rows[row].length - 1, col));
+                    addLetterToComposing(rows[row][col]);
                     return true;
                 }
+
                 if ("数字".equals(currentMode)) {
-                    String[][] numRows = {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"-", "0", "."}};
-                    int r = (int) ((y - (topHeight + candHeight)) / (keyHeight / numRows.length));
-                    int c = (int) (x / (width / numRows[r].length));
-                    commitText(numRows[r][c]);
+                    String[][] rows = {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"-", "0", "."}};
+                    int row = (int) ((y - (topBarHeight + candidateHeight)) / (keyboardHeight / rows.length));
+                    row = Math.max(0, Math.min(rows.length - 1, row));
+                    float cellWidth = width / rows[row].length;
+                    int col = (int) (x / cellWidth);
+                    col = Math.max(0, Math.min(rows[row].length - 1, col));
+                    commitText(rows[row][col]);
                     return true;
                 }
+
                 if ("符号".equals(currentMode)) {
-                    String[][] symRows = {{"。", "，", "？", "！", "；", "："},
+                    String[][] rows = {{"。", "，", "？", "！", "；", "："},
                             {"、", "…", "（", "）", "“", "”"},
                             {"《", "》", "—", "￥", "@", "/"},
                             {"！", "？", "%", "&", "*", "…"}};
-                    int r = (int) ((y - (topHeight + candHeight)) / (keyHeight / symRows.length));
-                    r = Math.max(0, Math.min(symRows.length - 1, r));
-                    int c = (int) (x / (width / symRows[r].length));
-                    c = Math.max(0, Math.min(symRows[r].length - 1, c));
-                    commitText(symRows[r][c]);
+                    int row = (int) ((y - (topBarHeight + candidateHeight)) / (keyboardHeight / rows.length));
+                    row = Math.max(0, Math.min(rows.length - 1, row));
+                    float cellWidth = width / rows[row].length;
+                    int col = (int) (x / cellWidth);
+                    col = Math.max(0, Math.min(rows[row].length - 1, col));
+                    commitText(rows[row][col]);
                     return true;
                 }
             }
