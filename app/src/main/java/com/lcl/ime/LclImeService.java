@@ -11,7 +11,6 @@ import android.graphics.Typeface;
 import android.inputmethodservice.InputMethodService;
 import android.os.Handler;
 import android.os.Looper;
-import android.text.Editable;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
@@ -27,68 +26,57 @@ public class LclImeService extends InputMethodService {
     private Board board;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable longDeleteRunnable = new Runnable() {
-        @Override
-        public void run() {
-            if (board != null) {
-                board.handleLongDelete();
-            }
+        @Override public void run() {
+            if (board != null) board.handleLongDelete();
         }
     };
 
-    @Override
-    public View onCreateInputView() {
+    @Override public View onCreateInputView() {
         board = new Board(this);
         return board;
     }
 
-    @Override
-    public void onStartInputView(EditorInfo info, boolean restarting) {
+    @Override public void onStartInputView(EditorInfo info, boolean restarting) {
         super.onStartInputView(info, restarting);
-        if (board != null) {
-            board.invalidate();
-        }
+        if (board != null) board.invalidate();
     }
 
     void commitText(String text) {
         if (text == null || text.isEmpty()) return;
         InputConnection ic = getCurrentInputConnection();
-        if (ic != null) {
-            ic.commitText(text, 1);
-        }
+        if (ic != null) ic.commitText(text, 1);
     }
 
     void setComposingText(String text) {
-        if (text == null || text.isEmpty()) {
-            finishComposingText();
-            return;
-        }
         InputConnection ic = getCurrentInputConnection();
-        if (ic != null) {
-            ic.setComposingText(text, 1);
-        }
+        if (ic == null) return;
+        if (text == null || text.isEmpty()) ic.finishComposingText();
+        else ic.setComposingText(text, 1);
     }
 
     void finishComposingText() {
         InputConnection ic = getCurrentInputConnection();
-        if (ic != null) {
-            ic.finishComposingText();
-        }
+        if (ic != null) ic.finishComposingText();
     }
 
     void deleteOneChar() {
         InputConnection ic = getCurrentInputConnection();
-        if (ic != null) {
-            ic.deleteSurroundingText(1, 0);
-        }
+        if (ic != null) ic.deleteSurroundingText(1, 0);
     }
 
     void clearCurrentText() {
         InputConnection ic = getCurrentInputConnection();
-        if (ic != null) {
-            Editable editable = ic.getEditableText();
-            if (editable != null) {
-                editable.clear();
-            }
+        if (ic == null) return;
+        CharSequence before = ic.getTextBeforeCursor(10000, 0);
+        CharSequence after = ic.getTextAfterCursor(10000, 0);
+        int beforeLength = before == null ? 0 : before.length();
+        int afterLength = after == null ? 0 : after.length();
+        if (beforeLength == 0 && afterLength == 0) return;
+        ic.beginBatchEdit();
+        try {
+            ic.deleteSurroundingText(beforeLength, afterLength);
+        } finally {
+            ic.endBatchEdit();
         }
     }
 
@@ -104,33 +92,14 @@ public class LclImeService extends InputMethodService {
         private final String[] modeLabels = {"26键", "T9", "数字", "符号", "手写"};
         private final Map<String, String[]> dictionary = new HashMap<>();
         private final Map<Character, Character> traditionalMap = new HashMap<>();
-
-        private String currentMode = "26键";
-        private String theme = "浅色";
-        private String language = "中";
-        private String script = "简";
-        private boolean shift = false;
-        private boolean menuOpen = false;
-        private String composing = "";
-        private String t9Buffer = "";
-        private String lastT9Key = "";
-        private long lastT9TapAt = 0L;
+        private String currentMode = "26键", theme = "浅色", language = "中", script = "简";
+        private boolean shift, menuOpen;
+        private String composing = "", t9Buffer = "", lastT9Key = "";
+        private long lastT9TapAt;
         private ArrayList<String> candidates = new ArrayList<>();
-        private ArrayList<Float> strokeX = new ArrayList<>();
-        private ArrayList<Float> strokeY = new ArrayList<>();
-
-        private int bgColor;
-        private int keyColor;
-        private int textColor;
-        private int accentColor;
-        private int accentTextColor;
-
-        private float width;
-        private float height;
-        private float topBarHeight;
-        private float bottomBarHeight;
-        private float candidateHeight;
-        private float keyboardHeight;
+        private ArrayList<Float> strokeX = new ArrayList<>(), strokeY = new ArrayList<>();
+        private int bgColor, keyColor, textColor, accentColor, accentTextColor;
+        private float width, height, topBarHeight, bottomBarHeight, candidateHeight, keyboardHeight;
 
         Board(Context context) {
             super(context);
@@ -159,528 +128,134 @@ public class LclImeService extends InputMethodService {
         }
 
         private void initTraditionalMap() {
-            traditionalMap.put('国', '國');
-            traditionalMap.put('人', '人');
-            traditionalMap.put('我', '我');
-            traditionalMap.put('你', '你');
-            traditionalMap.put('好', '好');
-            traditionalMap.put('中', '中');
-            traditionalMap.put('来', '來');
-            traditionalMap.put('为', '為');
-            traditionalMap.put('与', '與');
-            traditionalMap.put('这', '這');
-            traditionalMap.put('里', '裡');
-            traditionalMap.put('云', '雲');
-            traditionalMap.put('万', '萬');
-            traditionalMap.put('汉', '漢');
-            traditionalMap.put('语', '語');
-            traditionalMap.put('龙', '龍');
-            traditionalMap.put('门', '門');
-            traditionalMap.put('马', '馬');
-            traditionalMap.put('后', '後');
-            traditionalMap.put('发', '發');
+            traditionalMap.put('国', '國'); traditionalMap.put('来', '來'); traditionalMap.put('为', '為');
+            traditionalMap.put('与', '與'); traditionalMap.put('这', '這'); traditionalMap.put('里', '裡');
+            traditionalMap.put('云', '雲'); traditionalMap.put('万', '萬'); traditionalMap.put('汉', '漢');
+            traditionalMap.put('语', '語'); traditionalMap.put('龙', '龍'); traditionalMap.put('门', '門');
+            traditionalMap.put('马', '馬'); traditionalMap.put('后', '後'); traditionalMap.put('发', '發');
         }
 
         private void updateThemeColors() {
             if ("深色".equals(theme)) {
-                bgColor = 0xFF202124;
-                keyColor = 0xFF2E3136;
-                textColor = 0xFFFFFFFF;
-                accentColor = 0xFF8AB4F8;
-                accentTextColor = 0xFFFFFFFF;
+                bgColor=0xFF202124; keyColor=0xFF2E3136; textColor=Color.WHITE; accentColor=0xFF8AB4F8; accentTextColor=Color.WHITE;
             } else if ("蓝色".equals(theme)) {
-                bgColor = 0xFFEAF3FF;
-                keyColor = 0xFFFFFFFF;
-                textColor = 0xFF183A5B;
-                accentColor = 0xFF3A7FE8;
-                accentTextColor = 0xFFFFFFFF;
+                bgColor=0xFFEAF3FF; keyColor=Color.WHITE; textColor=0xFF183A5B; accentColor=0xFF3A7FE8; accentTextColor=Color.WHITE;
             } else if ("绿色".equals(theme)) {
-                bgColor = 0xFFEAF7EE;
-                keyColor = 0xFFFFFFFF;
-                textColor = 0xFF18472D;
-                accentColor = 0xFF2E9C5A;
-                accentTextColor = 0xFFFFFFFF;
+                bgColor=0xFFEAF7EE; keyColor=Color.WHITE; textColor=0xFF18472D; accentColor=0xFF2E9C5A; accentTextColor=Color.WHITE;
             } else {
-                bgColor = 0xFFF2F3F5;
-                keyColor = 0xFFFFFFFF;
-                textColor = 0xFF1F2328;
-                accentColor = 0xFF4C83D8;
-                accentTextColor = 0xFFFFFFFF;
+                bgColor=0xFFF2F3F5; keyColor=Color.WHITE; textColor=0xFF1F2328; accentColor=0xFF4C83D8; accentTextColor=Color.WHITE;
             }
         }
 
-        @Override
-        protected void onDraw(Canvas canvas) {
+        @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
-            width = getWidth();
-            height = getHeight();
-            updateThemeColors();
-
-            topBarHeight = height * 0.14f;
-            candidateHeight = candidates.isEmpty() ? 0f : height * 0.12f;
-            bottomBarHeight = height * 0.16f;
-            keyboardHeight = height - topBarHeight - candidateHeight - bottomBarHeight;
-
-            canvas.drawColor(bgColor);
-            drawTopBar(canvas);
-            drawCandidateBar(canvas);
-            drawMainArea(canvas);
-            drawBottomBar(canvas);
-            if (menuOpen) {
-                drawModeMenu(canvas);
-            }
+            width=getWidth(); height=getHeight(); updateThemeColors();
+            topBarHeight=height*.14f; candidateHeight=candidates.isEmpty()?0:height*.12f;
+            bottomBarHeight=height*.16f; keyboardHeight=height-topBarHeight-candidateHeight-bottomBarHeight;
+            canvas.drawColor(bgColor); drawTopBar(canvas); drawCandidateBar(canvas); drawMainArea(canvas); drawBottomBar(canvas);
+            if (menuOpen) drawModeMenu(canvas);
         }
 
-        private void drawTopBar(Canvas canvas) {
-            float cellWidth = width / 4f;
-            String[] labels = {"键盘", "主题", "剪贴板", "隐藏"};
-            for (int i = 0; i < 4; i++) {
-                float left = i * cellWidth + 4f;
-                float top = 8f;
-                float right = (i + 1) * cellWidth - 4f;
-                float bottom = topBarHeight - 8f;
-                drawRoundedRect(canvas, left, top, right, bottom, keyColor);
-                drawText(canvas, labels[i], (left + right) / 2f, topBarHeight * 0.58f, textColor, 16f, Paint.Align.CENTER);
-            }
+        private void drawTopBar(Canvas c) {
+            float cell=width/4f; String[] labels={"键盘","主题","剪贴板","隐藏"};
+            for(int i=0;i<4;i++){float l=i*cell+4,r=(i+1)*cell-4; rounded(c,l,8,r,topBarHeight-8,keyColor); text(c,labels[i],(l+r)/2,topBarHeight*.58f,textColor,16,Paint.Align.CENTER);}
         }
-
-        private void drawCandidateBar(Canvas canvas) {
-            if (candidates.isEmpty()) return;
-            float y = topBarHeight + candidateHeight * 0.58f;
-            if (!composing.isEmpty()) {
-                drawText(canvas, composing + " ", 12f, y, accentColor, 16f, Paint.Align.LEFT);
-            }
-            float startX = Math.max(90f, width * 0.32f);
-            float slotWidth = (width - startX) / Math.max(1, Math.min(6, candidates.size()));
-            for (int i = 0; i < Math.min(candidates.size(), 6); i++) {
-                drawText(canvas, candidates.get(i), startX + i * slotWidth + slotWidth * 0.5f, y, textColor, 17f, Paint.Align.CENTER);
-            }
+        private void drawCandidateBar(Canvas c) {
+            if(candidates.isEmpty())return;
+            float y=topBarHeight+candidateHeight*.58f;
+            if(!composing.isEmpty())text(c,composing+" ",12,y,accentColor,16,Paint.Align.LEFT);
+            float start=Math.max(90,width*.32f), slot=(width-start)/Math.max(1,Math.min(6,candidates.size()));
+            for(int i=0;i<Math.min(6,candidates.size());i++)text(c,candidates.get(i),start+(i+.5f)*slot,y,textColor,17,Paint.Align.CENTER);
         }
-
-        private void drawMainArea(Canvas canvas) {
-            float yStart = topBarHeight + candidateHeight;
-            if ("手写".equals(currentMode)) {
-                drawHandwriteArea(canvas, yStart);
-            } else {
-                drawKeyLayout(canvas, yStart);
-            }
-        }
-
-        private void drawKeyLayout(Canvas canvas, float yStart) {
-            String[][] rows;
-            if ("26键".equals(currentMode)) {
-                rows = new String[][]{{"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
-                        {"a", "s", "d", "f", "g", "h", "j", "k", "l"},
-                        {"z", "x", "c", "v", "b", "n", "m"}};
-            } else if ("T9".equals(currentMode)) {
-                rows = new String[][]{{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"*", "0", "#"}};
-            } else if ("数字".equals(currentMode)) {
-                rows = new String[][]{{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"-", "0", "."}};
-            } else {
-                rows = new String[][]{{"。", "，", "？", "！", "；", "："},
-                        {"、", "…", "（", "）", "“", "”"},
-                        {"《", "》", "—", "￥", "@", "/"},
-                        {"！", "？", "%", "&", "*", "…"}};
-            }
-
-            float keyTop = yStart;
-            float rowHeight = keyboardHeight / rows.length;
-            for (int rowIndex = 0; rowIndex < rows.length; rowIndex++) {
-                String[] row = rows[rowIndex];
-                float currentY = keyTop + rowIndex * rowHeight;
-                float cellWidth = width / row.length;
-                for (int col = 0; col < row.length; col++) {
-                    float left = col * cellWidth + 4f;
-                    float right = (col + 1) * cellWidth - 4f;
-                    float top = currentY + 4f;
-                    float bottom = currentY + rowHeight - 6f;
-                    String label = row[col];
-                    if ("26键".equals(currentMode) && label.length() == 1 && Character.isLetter(label.charAt(0))) {
-                        label = shift ? label.toUpperCase(Locale.ROOT) : label.toLowerCase(Locale.ROOT);
-                    }
-                    drawRoundedRect(canvas, left, top, right, bottom, keyColor);
-                    drawText(canvas, label, (left + right) / 2f, (top + bottom) / 2f + 10f, textColor, 18f, Paint.Align.CENTER);
+        private void drawMainArea(Canvas c) {
+            float y=topBarHeight+candidateHeight;
+            if("手写".equals(currentMode)){drawHandwrite(c,y);return;}
+            String[][] rows=keyRows(); float rowH=keyboardHeight/rows.length;
+            for(int r=0;r<rows.length;r++){
+                float cell=width/rows[r].length;
+                for(int col=0;col<rows[r].length;col++){
+                    float l=col*cell+4, t=y+r*rowH+4, right=(col+1)*cell-4, b=y+(r+1)*rowH-6;
+                    String label=rows[r][col];
+                    if("26键".equals(currentMode)&&shift)label=label.toUpperCase(Locale.ROOT);
+                    rounded(c,l,t,right,b,keyColor); text(c,label,(l+right)/2,(t+b)/2+10,textColor,18,Paint.Align.CENTER);
                 }
             }
         }
-
-        private void drawHandwriteArea(Canvas canvas, float yStart) {
-            float boardTop = yStart + 8f;
-            float boardBottom = height - bottomBarHeight - 8f;
-            drawRoundedRect(canvas, 8f, boardTop, width - 8f, boardBottom, 0xFFCED4DC);
-            drawText(canvas, "手写区：画字后松手识别", width / 2f, (boardTop + boardBottom) / 2f, textColor, 15f, Paint.Align.CENTER);
-
-            float clearLeft = width - 110f;
-            float clearTop = boardBottom - 54f;
-            float clearRight = width - 12f;
-            float clearBottom = boardBottom - 12f;
-            drawRoundedRect(canvas, clearLeft, clearTop, clearRight, clearBottom, keyColor);
-            drawText(canvas, "清空", (clearLeft + clearRight) / 2f, clearBottom - 22f, textColor, 14f, Paint.Align.CENTER);
-
-            if (!strokeX.isEmpty() && strokeY.size() == strokeX.size()) {
-                paint.setStyle(Paint.Style.STROKE);
-                paint.setColor(accentColor);
-                paint.setStrokeWidth(4f);
-                for (int i = 1; i < strokeX.size(); i++) {
-                    canvas.drawLine(strokeX.get(i - 1), strokeY.get(i - 1), strokeX.get(i), strokeY.get(i), paint);
-                }
-                paint.setStyle(Paint.Style.FILL);
-            }
+        private String[][] keyRows() {
+            if("26键".equals(currentMode))return new String[][]{{"q","w","e","r","t","y","u","i","o","p"},{"a","s","d","f","g","h","j","k","l"},{"z","x","c","v","b","n","m"}};
+            if("T9".equals(currentMode))return new String[][]{{"1","2","3"},{"4","5","6"},{"7","8","9"},{"*","0","#"}};
+            if("数字".equals(currentMode))return new String[][]{{"1","2","3"},{"4","5","6"},{"7","8","9"},{"-","0","."}};
+            return new String[][]{{"。","，","？","！","；","："},{"、","…","（","）","“","”"},{"《","》","—","￥","@","/"},{"！","？","%","&","*","…"}};
         }
-
-        private void drawBottomBar(Canvas canvas) {
-            String[] labels = {language, script, shift ? "SHIFT↑" : "SHIFT", "空格", "⌫", "↵"};
-            float[] widths = {0.12f, 0.12f, 0.15f, 0.27f, 0.14f, 0.20f};
-            float x = 0f;
-            for (int i = 0; i < labels.length; i++) {
-                float cellWidth = width * widths[i];
-                float left = x + 2f;
-                float top = height - bottomBarHeight + 4f;
-                float right = x + cellWidth - 2f;
-                float bottom = height - 4f;
-                int fillColor = (i == 3) ? accentColor : keyColor;
-                int textTint = (i == 3) ? accentTextColor : textColor;
-                drawRoundedRect(canvas, left, top, right, bottom, fillColor);
-                drawText(canvas, labels[i], (left + right) / 2f, (top + bottom) / 2f + 8f, textTint, 17f, Paint.Align.CENTER);
-                x += cellWidth;
-            }
+        private void drawHandwrite(Canvas c,float y) {
+            float top=y+8,bottom=height-bottomBarHeight-8; rounded(c,8,top,width-8,bottom,0xFFCED4DC);
+            text(c,"手写区：画字后松手识别",width/2,(top+bottom)/2,textColor,15,Paint.Align.CENTER);
+            float l=width-110, t=bottom-54, r=width-12, b=bottom-12; rounded(c,l,t,r,b,keyColor); text(c,"清空",(l+r)/2,b-22,textColor,14,Paint.Align.CENTER);
+            if(!strokeX.isEmpty()){paint.setStyle(Paint.Style.STROKE);paint.setColor(accentColor);paint.setStrokeWidth(4);for(int i=1;i<strokeX.size();i++)c.drawLine(strokeX.get(i-1),strokeY.get(i-1),strokeX.get(i),strokeY.get(i),paint);paint.setStyle(Paint.Style.FILL);}
         }
-
-        private void drawModeMenu(Canvas canvas) {
-            float menuX = 10f;
-            float menuY = topBarHeight + 8f;
-            float menuW = width * 0.42f;
-            float menuH = keyboardHeight * 0.62f;
-            drawRoundedRect(canvas, menuX, menuY, menuX + menuW, menuY + menuH, Color.WHITE);
-            for (int i = 0; i < modeLabels.length; i++) {
-                float y = menuY + 22f + i * (menuH / modeLabels.length);
-                drawText(canvas, modeLabels[i], menuX + menuW / 2f, y, textColor, 16f, Paint.Align.CENTER);
-            }
+        private void drawBottomBar(Canvas c) {
+            String[] labels={language,script,shift?"SHIFT↑":"SHIFT","空格","⌫","↵"}; float[] widths={.12f,.12f,.15f,.27f,.14f,.20f};float x=0;
+            for(int i=0;i<labels.length;i++){float cell=width*widths[i],l=x+2,r=x+cell-2,t=height-bottomBarHeight+4,b=height-4;int fill=i==3?accentColor:keyColor,tint=i==3?accentTextColor:textColor;rounded(c,l,t,r,b,fill);text(c,labels[i],(l+r)/2,(t+b)/2+8,tint,17,Paint.Align.CENTER);x+=cell;}
         }
-
-        private void drawRoundedRect(Canvas canvas, float left, float top, float right, float bottom, int color) {
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(color);
-            canvas.drawRoundRect(new RectF(left, top, right, bottom), 12f, 12f, paint);
+        private void drawModeMenu(Canvas c) {
+            float x=10,y=topBarHeight+8,w=width*.42f,h=keyboardHeight*.62f;rounded(c,x,y,x+w,y+h,keyColor);
+            for(int i=0;i<modeLabels.length;i++)text(c,modeLabels[i],x+w/2,y+22+i*h/modeLabels.length,textColor,16,Paint.Align.CENTER);
         }
+        private void rounded(Canvas c,float l,float t,float r,float b,int color){paint.setStyle(Paint.Style.FILL);paint.setColor(color);c.drawRoundRect(new RectF(l,t,r,b),12,12,paint);}
+        private void text(Canvas c,String s,float x,float y,int color,float size,Paint.Align align){paint.setStyle(Paint.Style.FILL);paint.setColor(color);paint.setTextAlign(align);paint.setTextSize(size);paint.setTypeface(Typeface.create("sans-serif",Typeface.NORMAL));c.drawText(s,x,y,paint);}
 
-        private void drawText(Canvas canvas, String text, float x, float y, int color, float textSize, Paint.Align align) {
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(color);
-            paint.setTextAlign(align);
-            paint.setTextSize(textSize);
-            paint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
-            canvas.drawText(text, x, y, paint);
-        }
-
-        private void refreshCandidates() {
+        private void refreshCandidates(){
             candidates.clear();
-            if (composing == null || composing.isEmpty()) {
-                invalidate();
-                return;
-            }
-            String key = composing.toLowerCase(Locale.ROOT);
-            String[] matched = dictionary.get(key);
-            if (matched != null) {
-                candidates.addAll(Arrays.asList(matched));
-            } else if (key.matches("[a-z]+")) {
-                candidates.add(key);
-            }
+            if(!composing.isEmpty()){String[] values=dictionary.get(composing.toLowerCase(Locale.ROOT));if(values!=null)candidates.addAll(Arrays.asList(values));else if(composing.matches("[a-z]+"))candidates.add(composing);}
             invalidate();
         }
-
-        private void submitCandidate(int index) {
-            if (index < 0 || index >= candidates.size()) return;
-            String value = candidates.get(index);
-            if ("繁".equals(script)) {
-                value = toTraditional(value);
-            }
-            finishComposingText();
-            commitText(value);
-            composing = "";
-            t9Buffer = "";
-            lastT9Key = "";
-            candidates.clear();
-            invalidate();
+        private String toTraditional(String value){StringBuilder out=new StringBuilder();for(int i=0;i<value.length();i++){char ch=value.charAt(i);Character mapped=traditionalMap.get(ch);out.append(mapped==null?ch:mapped);}return out.toString();}
+        private void submitCandidate(int index){
+            if(index<0||index>=candidates.size())return;String value=candidates.get(index);if("繁".equals(script))value=toTraditional(value);
+            finishComposingText();commitText(value);composing="";t9Buffer="";lastT9Key="";candidates.clear();invalidate();
         }
-
-        private String toTraditional(String value) {
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < value.length(); i++) {
-                char ch = value.charAt(i);
-                Character mapped = traditionalMap.get(ch);
-                sb.append(mapped == null ? ch : mapped);
-            }
-            return sb.toString();
+        private void addInput(String value){
+            if("En".equals(language)){commitText(shift?value.toUpperCase(Locale.ROOT):value.toLowerCase(Locale.ROOT));shift=false;invalidate();return;}
+            if("T9".equals(currentMode)){addT9(value);return;}
+            if("26键".equals(currentMode)&&value.matches("[a-zA-Z]")){composing+=value.toLowerCase(Locale.ROOT);setComposingText(composing);refreshCandidates();}else commitText(value);
         }
-
-        private void addLetterToComposing(String letter) {
-            if ("En".equals(language)) {
-                String output = shift ? letter.toUpperCase(Locale.ROOT) : letter.toLowerCase(Locale.ROOT);
-                commitText(output);
-                shift = false;
-                invalidate();
-                return;
-            }
-            if ("26键".equals(currentMode) || "T9".equals(currentMode)) {
-                if ("T9".equals(currentMode)) {
-                    addT9Letter(letter);
-                    return;
-                }
-                composing += letter.toLowerCase(Locale.ROOT);
-                setComposingText(composing);
-                refreshCandidates();
-            } else {
-                commitText(letter);
-            }
+        private void addT9(String digit){
+            if(!digit.matches("[2-9]"))return;String[] groups={"","","abc","def","ghi","jkl","mno","pqrs","tuv","wxyz"};String group=groups[Integer.parseInt(digit)];long now=System.currentTimeMillis();
+            if(lastT9Key.equals(digit)&&now-lastT9TapAt<800&&!t9Buffer.isEmpty()){int i=group.indexOf(t9Buffer.charAt(t9Buffer.length()-1));t9Buffer=String.valueOf(group.charAt((i+1)%group.length()));}else t9Buffer=group.substring(0,1);
+            lastT9Key=digit;lastT9TapAt=now;composing+=t9Buffer;setComposingText(composing);refreshCandidates();
         }
-
-        private void addT9Letter(String digit) {
-            if (!digit.matches("[2-9]")) return;
-            final String[] groups = {"", "", "abc", "def", "ghi", "jkl", "mno", "pqrs", "tuv", "wxyz"};
-            String group = groups[Integer.parseInt(digit)];
-            if (group.isEmpty()) return;
-
-            long now = System.currentTimeMillis();
-            if (lastT9Key.equals(digit) && now - lastT9TapAt < 800 && !t9Buffer.isEmpty()) {
-                int currentIndex = group.indexOf(t9Buffer.charAt(t9Buffer.length() - 1));
-                int nextIndex = (currentIndex + 1) % group.length();
-                t9Buffer = String.valueOf(group.charAt(nextIndex));
-            } else {
-                t9Buffer = String.valueOf(group.charAt(0));
-            }
-            lastT9Key = digit;
-            lastT9TapAt = now;
-            composing += t9Buffer;
-            setComposingText(composing);
-            refreshCandidates();
+        private void handleTop(int index){
+            if(index==0)menuOpen=!menuOpen;
+            else if(index==1)theme="浅色".equals(theme)?"深色":"深色".equals(theme)?"蓝色":"蓝色".equals(theme)?"绿色":"浅色";
+            else if(index==2){ClipboardManager cm=(ClipboardManager)getContext().getSystemService(Context.CLIPBOARD_SERVICE);if(cm!=null&&cm.hasPrimaryClip()){ClipData d=cm.getPrimaryClip();if(d!=null&&d.getItemCount()>0){CharSequence s=d.getItemAt(0).coerceToText(getContext());if(s!=null)commitText(s.toString());}}}
+            else if(index==3)requestHideSelf(0);invalidate();
         }
-
-        private void handleTopBarTap(int index) {
-            if (index == 0) {
-                menuOpen = !menuOpen;
-            } else if (index == 1) {
-                if ("浅色".equals(theme)) {
-                    theme = "深色";
-                } else if ("深色".equals(theme)) {
-                    theme = "蓝色";
-                } else if ("蓝色".equals(theme)) {
-                    theme = "绿色";
-                } else {
-                    theme = "浅色";
-                }
-            } else if (index == 2) {
-                ClipboardManager cm = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
-                if (cm != null && cm.hasPrimaryClip()) {
-                    ClipData clip = cm.getPrimaryClip();
-                    if (clip != null && clip.getItemCount() > 0) {
-                        CharSequence text = clip.getItemAt(0).coerceToText(getContext());
-                        if (text != null) {
-                            commitText(text.toString());
-                        }
-                    }
-                }
-            } else if (index == 3) {
-                requestHideSelf(0);
-            }
-            invalidate();
+        private void selectMode(int index){if(index<0||index>=modeLabels.length)return;currentMode=modeLabels[index];menuOpen=false;composing="";t9Buffer="";lastT9Key="";candidates.clear();finishComposingText();invalidate();}
+        private void handleBottom(int index){
+            if(index==0){language="中".equals(language)?"En":"中";composing="";t9Buffer="";lastT9Key="";candidates.clear();finishComposingText();}
+            else if(index==1){script="简".equals(script)?"繁":"简";}
+            else if(index==2)shift=!shift;
+            else if(index==3){if("中".equals(language)&&!composing.isEmpty()&&!candidates.isEmpty())submitCandidate(0);else commitText(" ");}
+            else if(index==4){if(!composing.isEmpty()){composing=composing.substring(0,composing.length()-1);setComposingText(composing);refreshCandidates();}else deleteOneChar();}
+            else sendEnter();invalidate();
         }
+        void handleLongDelete(){composing="";t9Buffer="";lastT9Key="";candidates.clear();finishComposingText();clearCurrentText();invalidate();}
+        private int bottomIndex(float x){float[] cuts={.12f,.24f,.39f,.66f,.82f,1f};for(int i=0;i<cuts.length;i++)if(x<=width*cuts[i])return i;return 5;}
 
-        private void handleModeChoice(int index) {
-            if (index < 0 || index >= modeLabels.length) return;
-            currentMode = modeLabels[index];
-            menuOpen = false;
-            composing = "";
-            t9Buffer = "";
-            lastT9Key = "";
-            candidates.clear();
-            finishComposingText();
-            invalidate();
-        }
-
-        private void handleBottomAction(int index) {
-            if (index == 0) {
-                language = "中".equals(language) ? "En" : "中";
-                composing = "";
-                t9Buffer = "";
-                lastT9Key = "";
-                candidates.clear();
-                finishComposingText();
-            } else if (index == 1) {
-                script = "简".equals(script) ? "繁" : "简";
-                if (!candidates.isEmpty()) {
-                    refreshCandidates();
-                }
-            } else if (index == 2) {
-                shift = !shift;
-            } else if (index == 3) {
-                if ("中".equals(language) && !composing.isEmpty() && !candidates.isEmpty()) {
-                    submitCandidate(0);
-                } else {
-                    commitText(" ");
-                }
-            } else if (index == 4) {
-                if (!composing.isEmpty()) {
-                    composing = composing.substring(0, composing.length() - 1);
-                    setComposingText(composing);
-                    refreshCandidates();
-                } else {
-                    deleteOneChar();
-                }
-            } else if (index == 5) {
-                sendEnter();
-            }
-            invalidate();
-        }
-
-        public void handleLongDelete() {
-            composing = "";
-            t9Buffer = "";
-            lastT9Key = "";
-            candidates.clear();
-            finishComposingText();
-            clearCurrentText();
-            invalidate();
-        }
-
-        private int bottomIndexForX(float x) {
-            float[] cuts = {0.12f, 0.24f, 0.39f, 0.66f, 0.82f, 1.0f};
-            for (int i = 0; i < cuts.length; i++) {
-                if (x <= width * cuts[i]) {
-                    return i;
-                }
-            }
-            return 5;
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent event) {
-            float x = event.getX();
-            float y = event.getY();
-
-            if (event.getAction() == MotionEvent.ACTION_DOWN && y >= height - bottomBarHeight && y <= height && x >= width * 0.82f && x <= width * 0.96f) {
-                uiHandler.removeCallbacks(longDeleteRunnable);
-                uiHandler.postDelayed(longDeleteRunnable, 500L);
-            }
-            if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
-                uiHandler.removeCallbacks(longDeleteRunnable);
-            }
-
-            if (event.getAction() != MotionEvent.ACTION_UP) {
-                if ("手写".equals(currentMode) && y > topBarHeight + candidateHeight && y < height - bottomBarHeight) {
-                    if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                        strokeX.clear();
-                        strokeY.clear();
-                    }
-                    if (event.getAction() == MotionEvent.ACTION_DOWN || event.getAction() == MotionEvent.ACTION_MOVE) {
-                        strokeX.add(x);
-                        strokeY.add(y);
-                        invalidate();
-                        return true;
-                    }
-                }
+        @Override public boolean onTouchEvent(MotionEvent e){
+            float x=e.getX(),y=e.getY();int action=e.getAction();
+            if(action==MotionEvent.ACTION_DOWN&&y>=height-bottomBarHeight&&x>=width*.82f&&x<=width*.96f){uiHandler.removeCallbacks(longDeleteRunnable);uiHandler.postDelayed(longDeleteRunnable,500);}
+            if(action==MotionEvent.ACTION_UP||action==MotionEvent.ACTION_CANCEL)uiHandler.removeCallbacks(longDeleteRunnable);
+            if(action!=MotionEvent.ACTION_UP){
+                if("手写".equals(currentMode)&&y>topBarHeight+candidateHeight&&y<height-bottomBarHeight){if(action==MotionEvent.ACTION_DOWN){strokeX.clear();strokeY.clear();}if(action==MotionEvent.ACTION_DOWN||action==MotionEvent.ACTION_MOVE){strokeX.add(x);strokeY.add(y);invalidate();return true;}}
                 return true;
             }
-
-            if (y < topBarHeight) {
-                int index = (int) (x / (width / 4f));
-                if (index >= 0 && index <= 3) {
-                    handleTopBarTap(index);
-                }
-                return true;
-            }
-
-            if (menuOpen && y >= topBarHeight && y <= topBarHeight + keyboardHeight * 0.62f) {
-                float menuTop = topBarHeight + 8f;
-                float menuHeight = keyboardHeight * 0.62f;
-                int index = (int) ((y - menuTop) / (menuHeight / modeLabels.length));
-                handleModeChoice(index);
-                return true;
-            }
-
-            if (!candidates.isEmpty() && y >= topBarHeight && y < topBarHeight + candidateHeight) {
-                float startX = Math.max(90f, width * 0.32f);
-                int index = (int) ((x - startX) / ((width - startX) / Math.max(1, Math.min(6, candidates.size()))));
-                submitCandidate(Math.max(0, Math.min(candidates.size() - 1, index)));
-                return true;
-            }
-
-            if (y >= height - bottomBarHeight) {
-                handleBottomAction(bottomIndexForX(x));
-                return true;
-            }
-
-            if ("手写".equals(currentMode) && y > topBarHeight + candidateHeight && y < height - bottomBarHeight) {
-                if (x > width - 110f && y > height - bottomBarHeight - 54f) {
-                    strokeX.clear();
-                    strokeY.clear();
-                    candidates.clear();
-                    invalidate();
-                    return true;
-                }
-                if (strokeX.size() > 8) {
-                    candidates.clear();
-                    candidates.add("一");
-                    candidates.add("二");
-                    candidates.add("口");
-                    candidates.add("人");
-                    candidates.add("大");
-                    candidates.add("中");
-                    invalidate();
-                }
-                return true;
-            }
-
-            if (y > topBarHeight + candidateHeight && y < height - bottomBarHeight) {
-                if ("26键".equals(currentMode)) {
-                    String[][] rows = {{"q", "w", "e", "r", "t", "y", "u", "i", "o", "p"},
-                            {"a", "s", "d", "f", "g", "h", "j", "k", "l"},
-                            {"z", "x", "c", "v", "b", "n", "m"}};
-                    int row = (int) ((y - (topBarHeight + candidateHeight)) / (keyboardHeight / rows.length));
-                    row = Math.max(0, Math.min(rows.length - 1, row));
-                    float cellWidth = width / rows[row].length;
-                    int col = (int) (x / cellWidth);
-                    col = Math.max(0, Math.min(rows[row].length - 1, col));
-                    addLetterToComposing(rows[row][col]);
-                    return true;
-                }
-
-                if ("T9".equals(currentMode)) {
-                    String[][] rows = {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"*", "0", "#"}};
-                    int row = (int) ((y - (topBarHeight + candidateHeight)) / (keyboardHeight / rows.length));
-                    row = Math.max(0, Math.min(rows.length - 1, row));
-                    float cellWidth = width / rows[row].length;
-                    int col = (int) (x / cellWidth);
-                    col = Math.max(0, Math.min(rows[row].length - 1, col));
-                    addLetterToComposing(rows[row][col]);
-                    return true;
-                }
-
-                if ("数字".equals(currentMode)) {
-                    String[][] rows = {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"-", "0", "."}};
-                    int row = (int) ((y - (topBarHeight + candidateHeight)) / (keyboardHeight / rows.length));
-                    row = Math.max(0, Math.min(rows.length - 1, row));
-                    float cellWidth = width / rows[row].length;
-                    int col = (int) (x / cellWidth);
-                    col = Math.max(0, Math.min(rows[row].length - 1, col));
-                    commitText(rows[row][col]);
-                    return true;
-                }
-
-                if ("符号".equals(currentMode)) {
-                    String[][] rows = {{"。", "，", "？", "！", "；", "："},
-                            {"、", "…", "（", "）", "“", "”"},
-                            {"《", "》", "—", "￥", "@", "/"},
-                            {"！", "？", "%", "&", "*", "…"}};
-                    int row = (int) ((y - (topBarHeight + candidateHeight)) / (keyboardHeight / rows.length));
-                    row = Math.max(0, Math.min(rows.length - 1, row));
-                    float cellWidth = width / rows[row].length;
-                    int col = (int) (x / cellWidth);
-                    col = Math.max(0, Math.min(rows[row].length - 1, col));
-                    commitText(rows[row][col]);
-                    return true;
-                }
-            }
+            if(y<topBarHeight){handleTop((int)(x/(width/4f)));return true;}
+            if(menuOpen&&y>=topBarHeight&&y<=topBarHeight+keyboardHeight*.62f){int i=(int)((y-topBarHeight-8)/(keyboardHeight*.62f/modeLabels.length));selectMode(i);return true;}
+            if(!candidates.isEmpty()&&y>=topBarHeight&&y<topBarHeight+candidateHeight){float start=Math.max(90,width*.32f);int i=(int)((x-start)/((width-start)/Math.max(1,Math.min(6,candidates.size()))));submitCandidate(Math.max(0,Math.min(candidates.size()-1,i)));return true;}
+            if(y>=height-bottomBarHeight){handleBottom(bottomIndex(x));return true;}
+            if("手写".equals(currentMode)&&y>topBarHeight+candidateHeight&&y<height-bottomBarHeight){if(x>width-110&&y>height-bottomBarHeight-54){strokeX.clear();strokeY.clear();candidates.clear();invalidate();return true;}if(strokeX.size()>8){candidates.clear();candidates.addAll(Arrays.asList("一","二","口","人","大","中"));invalidate();}return true;}
+            if(y>topBarHeight+candidateHeight&&y<height-bottomBarHeight){String[][] rows=keyRows();int row=Math.max(0,Math.min(rows.length-1,(int)((y-topBarHeight-candidateHeight)/(keyboardHeight/rows.length))));int col=Math.max(0,Math.min(rows[row].length-1,(int)(x/(width/rows[row].length))));addInput(rows[row][col]);return true;}
             return true;
         }
     }
